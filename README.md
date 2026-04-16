@@ -4,6 +4,57 @@ What we actually did to deploy a Python FastAPI app with a PostgreSQL database t
 
 ---
 
+## Architecture
+
+```mermaid
+graph TD
+    User["Browser / User"]
+    CA["Container App\naz-la-app\n(eastus)"]
+    ACR["Container Registry\nca663d5e252cacr\n(eastus)"]
+    DB["PostgreSQL\npsql-la-pub\n(uksouth)"]
+    RG["Resource Group: rg-learning"]
+
+    User -->|"HTTPS :443"| CA
+    CA -->|"pulls image on deploy"| ACR
+    CA -->|"DATABASE_URL over internet\nport 5432 + SSL"| DB
+
+    subgraph RG
+        CA
+        ACR
+        DB
+    end
+```
+
+**How it fits together:**
+- The user opens the app in a browser. The request hits the Container App over HTTPS.
+- The Container App runs the FastAPI code inside a Docker container. That container image is stored in the Container Registry and pulled each time you deploy.
+- When the app needs to read or write data, it connects to PostgreSQL over the internet using an encrypted connection string stored as an environment variable.
+
+---
+
+## Technology choices
+
+### FastAPI
+FastAPI is a Python framework for building web APIs. We used it because:
+- It's Python — readable, beginner-friendly, huge ecosystem
+- It auto-generates interactive docs at `/docs` so you can test endpoints in the browser without writing any extra code
+- It handles the HTTP layer (routing, request parsing, response formatting) so you just write functions
+
+The alternative would be Flask (simpler but fewer features) or Django (more features but much more setup). FastAPI is a good middle ground for learning.
+
+### PostgreSQL
+PostgreSQL is a relational database — data is stored in tables with rows and columns, like a spreadsheet, but with the ability to query and relate data across tables. We used it because:
+- It's the most popular open-source database and widely used in production
+- Azure has a managed version (Flexible Server) that handles backups, patching, and availability for you — you don't run it yourself
+- It pairs well with SQLAlchemy, the Python library the app uses to talk to it
+
+The alternative would be a simpler database like SQLite (no server needed, just a file) but that doesn't work well in the cloud where containers can restart and lose local files.
+
+### Why Docker / Container Apps instead of running Python directly
+When you deploy to the cloud, you need a consistent way to package your app and its dependencies so it runs the same way everywhere. Docker bundles your code, Python version, and all libraries into a single image. Container Apps runs that image and handles scaling, restarts, and HTTPS for you.
+
+---
+
 ## What's running
 
 | Resource | Name | Details |
