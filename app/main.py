@@ -21,6 +21,7 @@ import uvicorn
 # Import our own modules. The dot (.) means "from the same package (app/)".
 from .database import get_db, engine  # the DB connection and session factory
 from . import models, schemas          # table definitions and API shapes
+from .telemetry import setup_telemetry, build_browser_telemetry_snippet
 
 
 # Create all database tables on startup if they don't already exist.
@@ -47,6 +48,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+setup_telemetry(app)
 
 
 # --- Routes ---
@@ -61,7 +63,7 @@ def root():
     response_class=HTMLResponse tells FastAPI to send the return value as HTML,
     not wrap it in JSON (which is the default).
     """
-    return """
+    html = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -75,6 +77,7 @@ def root():
     button { padding: 8px 20px; font-size: 1rem; background: #0078d4; color: white;
              border: none; border-radius: 4px; cursor: pointer; }
     button:hover { background: #005fa3; }
+    button:disabled { background: #8faec8; cursor: not-allowed; }
     #status { margin-top: 10px; font-size: 0.9rem; color: green; }
     #error  { margin-top: 10px; font-size: 0.9rem; color: red; }
     ul { list-style: none; padding: 0; margin-top: 30px; }
@@ -83,57 +86,77 @@ def root():
     li .desc { color: #555; font-size: 0.9rem; margin-top: 2px; }
     li .date { color: #aaa; font-size: 0.8rem; margin-top: 4px; }
   </style>
+  __BROWSER_TELEMETRY_SNIPPET__
 </head>
 <body>
   <h1>Items</h1>
   <input id="name" type="text" placeholder="Name (required)" />
   <textarea id="desc" rows="2" placeholder="Description (optional)"></textarea>
-  <button onclick="addItem()">Save</button>
+  <button id="save-btn" onclick="addItem()">Save</button>
   <div id="status"></div>
   <div id="error"></div>
   <ul id="list"></ul>
 
   <script>
+    const nameInput = document.getElementById('name');
+    const descInput = document.getElementById('desc');
+    const saveBtn = document.getElementById('save-btn');
+    const statusEl = document.getElementById('status');
+    const errorEl = document.getElementById('error');
+    const list = document.getElementById('list');
+
     // Fetch all items from the API and render them in the list.
     async function loadItems() {
-      const res = await fetch('/items');
-      const items = await res.json();
-      const list = document.getElementById('list');
-      list.innerHTML = '';
-      // Reverse so newest items appear at the top.
-      items.reverse().forEach(item => {
-        const li = document.createElement('li');
-        li.innerHTML = '<div class="name">' + escHtml(item.name) + '</div>' +
-          (item.description ? '<div class="desc">' + escHtml(item.description) + '</div>' : '') +
-          '<div class="date">' + new Date(item.created_at).toLocaleString() + '</div>';
-        list.appendChild(li);
-      });
+      try {
+        const res = await fetch('/items');
+        if (!res.ok) { throw new Error('Failed to load items'); }
+        const items = await res.json();
+        list.innerHTML = '';
+        // Reverse so newest items appear at the top.
+        items.reverse().forEach(item => {
+          const li = document.createElement('li');
+          li.innerHTML = '<div class="name">' + escHtml(item.name) + '</div>' +
+            (item.description ? '<div class="desc">' + escHtml(item.description) + '</div>' : '') +
+            '<div class="date">' + new Date(item.created_at).toLocaleString() + '</div>';
+          list.appendChild(li);
+        });
+      } catch (_) {
+        errorEl.textContent = 'Unable to load items.';
+      }
     }
 
     // Read the form values and POST them to the API to create a new item.
     async function addItem() {
-      const name = document.getElementById('name').value.trim();
-      const desc = document.getElementById('desc').value.trim();
-      document.getElementById('status').textContent = '';
-      document.getElementById('error').textContent = '';
-      if (!name) { document.getElementById('error').textContent = 'Name is required.'; return; }
-      const res = await fetch('/items', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description: desc || null })
-      });
-      if (res.ok) {
-        document.getElementById('name').value = '';
-        document.getElementById('desc').value = '';
-        document.getElementById('status').textContent = 'Saved!';
-        loadItems();  // refresh the list
-      } else {
-        document.getElementById('error').textContent = 'Something went wrong.';
+      const name = nameInput.value.trim();
+      const desc = descInput.value.trim();
+      statusEl.textContent = '';
+      errorEl.textContent = '';
+      if (!name) { errorEl.textContent = 'Name is required.'; return; }
+      if (saveBtn.disabled) { return; }
+
+      saveBtn.disabled = true;
+      statusEl.textContent = 'Saving...';
+      try {
+        const res = await fetch('/items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description: desc || null })
+        });
+        if (!res.ok) { throw new Error('Failed to save item'); }
+        nameInput.value = '';
+        descInput.value = '';
+        statusEl.textContent = 'Saved!';
+        await loadItems();  // refresh the list
+      } catch (_) {
+        statusEl.textContent = '';
+        errorEl.textContent = 'Something went wrong.';
+      } finally {
+        saveBtn.disabled = false;
       }
     }
 
     // Escape special HTML characters to prevent XSS — if someone saves
-    // "<script>alert('hi')</script>" as an item name, this stops it from running.
+    // "<script>alert('hi')<\\/script>" as an item name, this stops it from running.
     function escHtml(str) {
       return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
@@ -144,6 +167,7 @@ def root():
 </body>
 </html>
 """
+    return html.replace("__BROWSER_TELEMETRY_SNIPPET__", build_browser_telemetry_snippet())
 
 
 @app.get("/health")
