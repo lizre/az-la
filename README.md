@@ -169,6 +169,12 @@ az containerapp update --name az-la-app --resource-group rg-learning --set-env-v
 
 > Single quotes are required around the value — `!` and `@` break zsh in double quotes.
 
+Enable Application Insights + OpenTelemetry (API traces, per-endpoint latency, and browser page-load telemetry):
+
+```bash
+az containerapp update --name az-la-app --resource-group rg-learning --set-env-vars 'APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=<key>;IngestionEndpoint=<endpoint>'
+```
+
 ---
 
 ## Step 7 — Redeploy after code changes
